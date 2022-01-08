@@ -46,24 +46,6 @@ def get_ip():
         s.connect((get_machine_default_gateway_ip(), 80))
         return s.getsockname()[0]
 
-def get_free_port():
-    """
-        Return the next freely available port number.
-
-        Note: the port is released, so could theoretically be used by another
-        process before it is effectively used by the caller of this function,
-        this is a potential race condition, however ports are generally
-        allocated in a cycling fashion, so unless another process has
-        hard-coded this particular port number, then chances are extremely slim
-        for it to be used before the caller does.
-    """
-    with contextlib.closing(socket.socket(socket.AF_INET,
-                                          socket.SOCK_STREAM)) as s:
-        s.bind(('', 0))
-        s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
-        return s.getsockname()[1]
-
-
 class RemoteSyncManager:
     '''
         `class RemoteSyncManager:` provides an easier interface to work with
@@ -113,7 +95,7 @@ class RemoteSyncManager:
     class syncmanager(mpm.SyncManager):
         pass
 
-    def __init__(self, serverdatafilename, namedobjects = None):
+    def __init__(self, serverdatafilename, authkey, namedobjects = None):
         # If namedobjects is defined, we start the server side
         # Otherwise we start the client side
 
@@ -346,15 +328,12 @@ class RemoteSyncManager:
                     self.clientobjects.append((name, proxytype))
                     self.syncmanager.register('get_' + name, callable=retobj(obj), proxytype=proxytype)
 
-            newportnumber = get_free_port()
-            self.serverdata = {'address': (get_ip(), newportnumber), 'authkey': b'mptest'}
-            with open(serverdatafilename, 'wb') as serverdata_file:
-                pickle.dump((self.serverdata, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats), serverdata_file, pickle.HIGHEST_PROTOCOL)
-
-            serverdata = self.serverdata
-            serverdata['address'] = ('', newportnumber)
-            self.server = self.syncmanager(**serverdata)
+            self.server = self.syncmanager(address = ('', 0), authkey = authkey)
             self.server.start()
+
+            self.serveraddress = (get_ip(), self.server.address[1])
+            with open(serverdatafilename, 'wb') as serverdata_file:
+                pickle.dump((self.serveraddress, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats), serverdata_file, pickle.HIGHEST_PROTOCOL)
 
             for objdesc in self.clientobjects:
                 name = objdesc[0]
@@ -377,7 +356,7 @@ class RemoteSyncManager:
 
         else:
             with open(serverdatafilename, 'rb') as serverdata_file:
-                (self.serverdata, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats) = pickle.load(serverdata_file)
+                (self.serveraddress, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats) = pickle.load(serverdata_file)
 
             for objdesc in self.clientobjects:
                 if len(objdesc) == 1:
@@ -390,7 +369,7 @@ class RemoteSyncManager:
                     (name, proxytype, exposed) = objdesc
                     self.syncmanager.register('get_' + name, proxytype=proxytype, exposed=exposed)
 
-            self.client = self.syncmanager(**self.serverdata)
+            self.client = self.syncmanager(address = self.serveraddress, authkey = authkey)
             self.client.connect()
 
             for objdesc in self.clientobjects:

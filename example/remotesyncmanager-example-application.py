@@ -3,23 +3,12 @@
 import sys
 import time
 import datetime
+import code
 import queue
 import threading
 import multiprocessing as mp
 import multiprocessing.managers as mpm
 import remotesyncmanager as rsm
-
-
-def main_test_function():
-    print('Waiting for input:')
-    for line in sys.stdin:
-        print(f'[{line.strip()}]')
-        try:
-            print(eval(line.strip()))
-        except:
-            e = '\n'.join(f'{i}' for i in sys.exc_info())
-            print(f'Error = {e}')
-        print('Waiting for input:')
 
 
 def ProcA(name, RS):
@@ -84,7 +73,7 @@ def ProcB(name, RS):
 
 if __name__ == '__main__':
     if sys.argv[1] == 'server' and len(sys.argv) == 2:
-        RemoteSync = rsm.RemoteSyncManager('mpSERVERDATA.pkl', (
+        RemoteSync = rsm.RemoteSyncManager('mpSERVERDATA.pkl', b'testpw123$%^', (
             ('ns', mpm.Namespace()),
             ('q1', queue.Queue(1)),
             ('q2', queue.Queue(1)),
@@ -166,10 +155,10 @@ if __name__ == '__main__':
             Proc = mp.Process(target=ProcA, args=('proca, server process', RemoteSync))
             Proc.start()
 
-            main_test_function()
+            code.interact(local=globals())
 
     elif sys.argv[1] == 'client' and len(sys.argv) == 2:
-        RemoteSync = rsm.RemoteSyncManager('mpSERVERDATA.pkl')
+        RemoteSync = rsm.RemoteSyncManager('mpSERVERDATA.pkl', b'testpw123$%^')
         print(RemoteSync)
 
         print(f'Client ns = {RemoteSync.ns}')
@@ -210,6 +199,6 @@ if __name__ == '__main__':
         Proc = mp.Process(target=ProcB, args=('procb, client process', RemoteSync))
         Proc.start()
 
-        main_test_function()
+        code.interact(local=globals())
 
 # vim: se ai ts=2 expandtab sw=2 :
