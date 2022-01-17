@@ -3,6 +3,8 @@
 import os
 import sys
 import time
+import struct
+import random
 import datetime
 import netifaces
 import socket
@@ -15,29 +17,29 @@ import contextlib
 from contextlib import contextmanager
 
 
+def ip2int(addr):
+    return struct.unpack("!I", socket.inet_aton(addr))[0]
+
+
+def int2ip(addr):
+    return socket.inet_ntoa(struct.pack("!I", addr))
+
+
 def get_machine_default_gateway_ip():
-    """Return the default gateway IP for the machine."""
-    # This function [def get_machine_default_gateway_ip():] was borrowed
-    # (unmodified) from:
-    # https://www.programcreek.com/python/?code=maas%2Fmaas%2Fmaas-master%2Fsrc%2Fprovisioningserver%2Futils%2Fipaddr.py
-    # Under the GNU AFFERO GENERAL PUBLIC LICENSE, Version 3, 19 November 2007:
-    # https://www.programcreek.com/python/?code=maas%2Fmaas%2Fmaas-master%2FLICENSE
-    # or, http://www.gnu.org/licenses/agpl.html
-
+    '''
+    Return the first available gateway ip address
+    '''
     gateways = netifaces.gateways()
-    defaults = gateways.get("default")
-    if not defaults:
-        return
 
-    def default_ip(family):
-        gw_info = defaults.get(family)
-        if not gw_info:
-            return
-        addresses = netifaces.ifaddresses(gw_info[1]).get(family)
-        if addresses:
-            return addresses[0]["addr"]
+    if 'default' in gateways:
+        default = gateways['default']
+        if default:
+            return list(default.values())[0][0]
 
-    return default_ip(netifaces.AF_INET) or default_ip(netifaces.AF_INET6)
+    for k, v in gateways.items():
+        if k != 'default':
+            return v[0][0]
+
 
 def get_ip():
     """Return the IP of this machine as seen by the default gateway."""
@@ -45,6 +47,7 @@ def get_ip():
                                           socket.SOCK_DGRAM)) as s:
         s.connect((get_machine_default_gateway_ip(), 80))
         return s.getsockname()[0]
+
 
 class RemoteSyncManager:
     '''
@@ -284,7 +287,14 @@ class RemoteSyncManager:
         self.contextwrap = {}
         self.formats = {}
 
+        self.isServer = False
+        self.IP = get_ip()
+        self.PID = mp.current_process().pid
+        self.UID = self.IP + f'-P{self.PID}'
+        self.shortID = ('S' if self.isServer else 'c') + chr(33 + self.PID % 94) + chr(33 + ip2int(self.IP) % 94) + self.IP[-2:]
+
         if namedobjects:
+            self.isServer = True
             self.clientobjects = []
 
             for objdesc in namedobjects:
@@ -331,9 +341,10 @@ class RemoteSyncManager:
             self.server = self.syncmanager(address = ('', 0), authkey = authkey)
             self.server.start()
 
-            self.serveraddress = (get_ip(), self.server.address[1])
-            with open(serverdatafilename, 'wb') as serverdata_file:
-                pickle.dump((self.serveraddress, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats), serverdata_file, pickle.HIGHEST_PROTOCOL)
+            if serverdatafilename:
+                self.serveraddress = (self.IP, self.server.address[1])
+                with open(serverdatafilename, 'wb') as serverdata_file:
+                    pickle.dump((self.serveraddress, self.clientobjects, self.attributesmapping, self.contextwrap, self.formats), serverdata_file, pickle.HIGHEST_PROTOCOL)
 
             for objdesc in self.clientobjects:
                 name = objdesc[0]
@@ -385,11 +396,22 @@ class RemoteSyncManager:
 
                 else:
                     setattr(self, name, getattr(self.client, 'get_' + name)())
+                    obj = getattr(self, name)
 
                     if name in self.attributesmapping:
-                        obj = getattr(self, name)
                         for pair in self.attributesmapping[name]:
                             setattr(obj, pair[0], getattr(obj, pair[1]))
+
+        #
+        self.object = {}
+        self.objectname = {}
+
+        for objdesc in self.clientobjects:
+            name = objdesc[0]
+            obj = getattr(self, name)
+            self.object[name] = obj
+            self.objectname[obj] = name
+
 
     def __str__(self):
         S = []
